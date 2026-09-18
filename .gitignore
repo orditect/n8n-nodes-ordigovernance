@@ -1,4 +1,27 @@
+# Dependencies and build output
 node_modules/
 dist/
+
+# Packaging artifacts
 *.tgz
+*.tsbuildinfo
+
+# Environment / local configuration
 .env
+.env.local
+
+# Editor and OS noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+
+# Test / coverage artifacts
+coverage/
+.vitest/

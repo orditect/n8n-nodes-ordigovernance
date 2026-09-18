@@ -138,8 +138,9 @@ rm -rf ~/.n8n/custom/node_modules/n8n-nodes-ordigovernance
 npm install --prefix ~/.n8n/custom .
 n8n start
 
-# 2. Start the gateway with the demo registry (repo root)
-scripts/dev-gateway.sh   # exports GATEWAY_REGISTRY_MODULE + PYTHONPATH, serves :8180
+# 2. Start the gateway with the demo registry
+#    (sibling checkout of orditect-governance):
+cd ../orditect-governance && scripts/dev-gateway.sh
 ```
 
 The demo registry provides tool `search` and impls `researcher`, `writer`,
@@ -369,3 +370,6 @@ Test suite covers: governed-call payloads, message conversion
 (tool calls, ToolMessage pairing), credential type wiring, terminal-state
 polling, 409 auto-recovery, and readable error surfacing (`[status]
 body-snippet` convention — never raw stack traces to the UI).
+
+ > See docs/gateway-contract.md for the wire contracts and
+ > docs/gateway-pitfalls.md for the HTTP-visible lessons

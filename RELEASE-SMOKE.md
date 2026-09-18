@@ -7,8 +7,15 @@ evaluation, credential wiring, dispatcher liveness).
 
 ## Setup
 
-1. `scripts/dev-gateway.sh` (terminal 1, keep running)
-2. `scripts/dev-n8n.sh` (terminal 2, keep running)
+Two sibling checkouts are required:
+
+    ~/Projects/orditect-governance        # gateway + demo registry
+    ~/Projects/n8n-nodes-ordigovernance   # this repository
+
+1. Terminal 1 (keep running):
+   `cd ~/Projects/orditect-governance && scripts/dev-gateway.sh`
+2. Terminal 2 (keep running):
+   `cd ~/Projects/n8n-nodes-ordigovernance && scripts/dev-n8n.sh`
 3. Browser: hard-refresh http://localhost:5678
 
 ## Checks (import from workflows/, or reuse saved canvases)
