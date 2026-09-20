@@ -7,7 +7,7 @@ import type {
 } from 'n8n-workflow';
 import { NodeOperationError } from 'n8n-workflow';
 import { gatewayRequest, type GatewayCredentials } from '../shared/gatewayHttp';
-import { parseJsonObject } from '../shared/nodeParams';
+import { asTrimmedString, parseJsonObject } from '../shared/nodeParams';
 
 const CREDENTIAL_TYPE = 'ordigovernanceApi';
 const PATH_TOOL_CALL = '/governed/tool-call';
@@ -27,28 +27,13 @@ export class OrdigovernanceTool implements INodeType {
 		credentials: [{ name: CREDENTIAL_TYPE, required: true }],
 		properties: [
 			{
-				displayName: 'Client',
-				name: 'client',
-				type: 'string',
-				default: '',
-				required: true,
-				description: 'Client identifier recorded on the tool call',
-			},
-			{
-				displayName: 'Purpose',
-				name: 'purpose',
-				type: 'string',
-				default: '',
-				required: true,
-				description: 'Purpose label recorded on the tool call',
-			},
-			{
 				displayName: 'Tool Name',
 				name: 'toolName',
 				type: 'string',
 				default: '',
 				required: true,
-				description: 'Name of the registered tool to invoke',
+				description:
+					'Name of the registered tool to invoke (see GET /runs/{id}/vocabulary; unknown names fail with a 422 listing the valid names)',
 			},
 			{
 				displayName: 'Inputs',
@@ -70,7 +55,8 @@ export class OrdigovernanceTool implements INodeType {
 				name: 'taskId',
 				type: 'string',
 				default: '',
-				description: 'Optional task identifier to link this tool call to',
+				description:
+					'Optional task identifier to attribute the call to (must belong to the addressed run; 404 otherwise)',
 			},
 		],
 	};
@@ -84,21 +70,18 @@ export class OrdigovernanceTool implements INodeType {
 
 		for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
 			try {
-				const client = this.getNodeParameter('client', itemIndex) as string;
-				const purpose = this.getNodeParameter('purpose', itemIndex) as string;
-				const toolName = this.getNodeParameter('toolName', itemIndex) as string;
+				const toolName = asTrimmedString(this.getNodeParameter('toolName', itemIndex));
 				const toolInputs = parseJsonObject(
 					this.getNodeParameter('toolInputs', itemIndex),
 					'toolInputs',
 				);
-				const runId = (this.getNodeParameter('runId', itemIndex) as string).trim();
-				const taskId = (this.getNodeParameter('taskId', itemIndex) as string).trim();
+				const runId = asTrimmedString(this.getNodeParameter('runId', itemIndex));
+				const taskId = asTrimmedString(this.getNodeParameter('taskId', itemIndex));
 
-				// Gateway contract: tool arguments travel under "inputs" and are
-				// expanded into the handler as keyword arguments.
+				// Gateway ToolCallRequest schema: {tool, inputs, run_id?, task_id?}.
+				// The tool name doubles as the call_id purpose (naming
+				// discipline); unknown body fields are silently dropped.
 				const body: Record<string, unknown> = {
-					client,
-					purpose,
 					tool: toolName,
 					inputs: toolInputs,
 				};

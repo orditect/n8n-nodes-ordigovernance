@@ -77,6 +77,14 @@ export class OrdigovernanceTask implements INodeType {
 				description:
 					'Comma-separated task ids this task depends on. Recorded as dependency evidence edges (D1); n8n remains the scheduler.',
 			},
+						{
+				displayName: 'Tools Whitelist',
+				name: 'toolsWhitelist',
+				type: 'string',
+				default: '',
+				description:
+					'Optional comma-separated tool names the task may use (governance restriction over the registry; empty = all registered tools)',
+			},
 			{
 				displayName: 'Wait for Completion',
 				name: 'waitForCompletion',
@@ -124,6 +132,12 @@ export class OrdigovernanceTask implements INodeType {
 					.split(',')
 					.map((entry) => entry.trim())
 					.filter(Boolean);
+				const toolsWhitelist = asTrimmedString(
+					this.getNodeParameter('toolsWhitelist', itemIndex, ''),
+				)
+					.split(',')
+					.map((entry) => entry.trim())
+					.filter(Boolean);
 				const waitForCompletion = this.getNodeParameter(
 					'waitForCompletion',
 					itemIndex,
@@ -135,9 +149,11 @@ export class OrdigovernanceTask implements INodeType {
 				seenTaskIds.add(taskId);
 
 				// D1: upstream entries become dependency evidence edges.
-				// Gateway contract: the impl payload field is "params".
+				// Gateway contract: the impl payload field is "params"; the
+				// optional "tools" whitelist restricts the assembled tool set.
 				const body: Record<string, unknown> = { task_id: taskId, impl, params: taskInput };
 				if (upstream.length) body.upstream = upstream;
+				if (toolsWhitelist.length) body.tools = toolsWhitelist;
 
 				const submitted = await gatewayRequest(credentials, {
 					method: 'POST',

@@ -1,0 +1,131 @@
+{
+	"name": "ordigovernance: HITL pause -> await decision (slow researcher)",
+	"active": false,
+	"nodes": [
+		{
+			"parameters": {
+				"content": "## HITL long-running demo\n\n1. Run the workflow: a slow_researcher (30s cooperative window) is submitted, then paused mid-window -- it settles cancelled.\n2. OUT OF BAND, the human approves by resuming the tree from any shell:\n\ncurl -X POST \"$GW/runs/<run-id>/hitl/resume\" -H \"Authorization: Bearer $TOKEN\" -H 'Content-Type: application/json' -d '{}'\n\n3. 'Await Decision' resolves approved when the new generation appears (rejected means the run finished without one); the archived generation content is then read from the viewer (set the credential's Viewer Base URL) and the run finishes.\n\nThe 3s Wait lets the task reach RUNNING before the pause lands. Never restart the gateway between the pause and the resume (dead dispatcher)."
+			},
+			"id": "bbbbbbbb-0000-4000-8000-000000000001",
+			"name": "Sticky Note",
+			"type": "n8n-nodes-base.stickyNote",
+			"typeVersion": 1,
+			"position": [-680, -260]
+		},
+		{
+			"parameters": {},
+			"id": "bbbbbbbb-0000-4000-8000-000000000002",
+			"name": "Manual Trigger",
+			"type": "n8n-nodes-base.manualTrigger",
+			"typeVersion": 1,
+			"position": [-680, 0]
+		},
+		{
+			"parameters": {
+				"operation": "start",
+				"runId": "",
+				"budgetMaxUnits": 0,
+				"intent": "hitl long demo",
+				"metadata": "{}",
+				"cancelExistingOnConflict": true
+			},
+			"id": "bbbbbbbb-0000-4000-8000-000000000003",
+			"name": "Run Start",
+			"type": "n8n-nodes-ordigovernance.ordigovernanceRun",
+			"typeVersion": 1,
+			"position": [-460, 0]
+		},
+		{
+			"parameters": {
+				"runId": "={{ $('Run Start').item.json.run_id }}",
+				"taskId": "=slow-researcher-{{ $execution.id }}",
+				"impl": "slow_researcher",
+				"taskInput": "={{ { topic: 'ev-battery', delay_seconds: 30 } }}",
+				"upstream": "",
+				"toolsWhitelist": "",
+				"waitForCompletion": false
+			},
+			"id": "bbbbbbbb-0000-4000-8000-000000000004",
+			"name": "Submit Slow Researcher",
+			"type": "n8n-nodes-ordigovernance.ordigovernanceTask",
+			"typeVersion": 1,
+			"position": [-240, 0]
+		},
+		{
+			"parameters": {
+				"resume": "timeInterval",
+				"amount": 3,
+				"unit": "seconds"
+			},
+			"id": "bbbbbbbb-0000-4000-8000-000000000005",
+			"name": "Wait For Window",
+			"type": "n8n-nodes-base.wait",
+			"typeVersion": 1.1,
+			"position": [-20, 0]
+		},
+		{
+			"parameters": {
+				"operation": "pause",
+				"runId": "={{ $('Run Start').item.json.run_id }}",
+				"taskId": "={{ $('Submit Slow Researcher').item.json.task_id }}",
+				"waitForReceipt": true,
+				"pollIntervalMs": 1000,
+				"pollTimeoutMs": 30000
+			},
+			"id": "bbbbbbbb-0000-4000-8000-000000000006",
+			"name": "Pause Task",
+			"type": "n8n-nodes-ordigovernance.ordigovernanceApproval",
+			"typeVersion": 1,
+			"position": [200, 0]
+		},
+		{
+			"parameters": {
+				"operation": "awaitDecision",
+				"runId": "={{ $('Run Start').item.json.run_id }}",
+				"taskId": "={{ $('Submit Slow Researcher').item.json.task_id }}",
+				"pollIntervalMs": 2000,
+				"pollTimeoutMs": 600000
+			},
+			"id": "bbbbbbbb-0000-4000-8000-000000000007",
+			"name": "Await Decision",
+			"type": "n8n-nodes-ordigovernance.ordigovernanceApproval",
+			"typeVersion": 1,
+			"position": [420, 0]
+		},
+		{
+			"parameters": {
+				"operation": "getGeneration",
+				"runId": "={{ $('Run Start').item.json.run_id }}",
+				"taskId": "={{ $('Submit Slow Researcher').item.json.task_id }}",
+				"executionId": "={{ $('Await Decision').item.json.execution_id }}",
+				"rootId": ""
+			},
+			"id": "bbbbbbbb-0000-4000-8000-000000000008",
+			"name": "Read Approved Generation",
+			"type": "n8n-nodes-ordigovernance.ordigovernanceEvidence",
+			"typeVersion": 1,
+			"position": [640, 0]
+		},
+		{
+			"parameters": {
+				"operation": "finish",
+				"runId": "={{ $('Run Start').item.json.run_id }}"
+			},
+			"id": "bbbbbbbb-0000-4000-8000-000000000009",
+			"name": "Run Finish",
+			"type": "n8n-nodes-ordigovernance.ordigovernanceRun",
+			"typeVersion": 1,
+			"position": [860, 0]
+		}
+	],
+	"connections": {
+		"Manual Trigger": { "main": [[{ "node": "Run Start", "type": "main", "index": 0 }]] },
+		"Run Start": { "main": [[{ "node": "Submit Slow Researcher", "type": "main", "index": 0 }]] },
+		"Submit Slow Researcher": { "main": [[{ "node": "Wait For Window", "type": "main", "index": 0 }]] },
+		"Wait For Window": { "main": [[{ "node": "Pause Task", "type": "main", "index": 0 }]] },
+		"Pause Task": { "main": [[{ "node": "Await Decision", "type": "main", "index": 0 }]] },
+		"Await Decision": { "main": [[{ "node": "Read Approved Generation", "type": "main", "index": 0 }]] },
+		"Read Approved Generation": { "main": [[{ "node": "Run Finish", "type": "main", "index": 0 }]] }
+	},
+	"settings": { "executionOrder": "v1" }
+}

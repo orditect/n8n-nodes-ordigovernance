@@ -29,6 +29,14 @@ export class OrdigovernanceApi implements ICredentialType {
 			default: '',
 			description: 'The GATEWAY_AUTH_TOKEN of the gateway deployment',
 		},
+		{
+			displayName: 'Viewer Base URL',
+			name: 'viewerBaseUrl',
+			type: 'string',
+			default: 'http://localhost:8181',
+			description:
+				'Base URL of the cold-path viewer host serving the evidence endpoints (tree / generations / graph / audit / validate). Used by the Evidence node; empty falls back to this default.',
+		},
 	];
 
 	authenticate: IAuthenticateGeneric = {
@@ -40,10 +48,13 @@ export class OrdigovernanceApi implements ICredentialType {
 		},
 	};
 
+	// The credential test must exercise an AUTHENTICATED route: /healthz
+	// is auth-exempt on the gateway, so a wrong token passed the test
+	// and the first real call failed with 401 (false positive).
 	test: ICredentialTestRequest = {
 		request: {
 			baseURL: '={{$credentials.baseUrl}}',
-			url: '/healthz',
+			url: '/runs',
 			method: 'GET',
 		},
 	};

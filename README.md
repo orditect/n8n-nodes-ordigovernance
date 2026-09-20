@@ -42,6 +42,7 @@ Pin your install to the version your n8n ships when they disagree.
 | Ordigovernance Chat Model | supply-data (AI model) | M1 ✅ |
 | Ordigovernance Run / Tool / Task / Approval | action | M2/M3/M4 ✅ canvas-verified |
 | Ordigovernance Composite | action | M5 ✅ quality-gate converged [42, 92] |
+| Ordigovernance Evidence | action (read-only) | contract-locked (viewer cold path) |
 
 ### Ordigovernance Chat Model
 
@@ -147,28 +148,62 @@ The demo registry provides tool `search` and impls `researcher`, `writer`,
 `reviewer`, `publisher`, plus composite `quality_gate_pair`
 (`examples/gateway_n8n/registry.py`).
 
+## Starting the evidence viewer (required for the Evidence node)
+**Easiest**: from the orditect-governance checkout, launch the full
+stack (gateway + viewer + n8n, each in its own terminal) with:
+
+    scripts/dev-stack.sh
+
+**Manual** (viewer only, third terminal alongside gateway and n8n):
+The Evidence node reads the cold path through the **viewer host**
+(`viewerBaseUrl` on the credential, default `http://localhost:8181`)
+-- never through the gateway (D14: hot reads close when the run
+finishes). If it is not running, every Evidence operation fails with
+`gateway unreachable at http://localhost:8181`.
+
+Start it in the orditect-governance checkout (third terminal,
+alongside gateway and n8n):
+
+    GATEWAY_TRACE_ROOT=data/gateway-runs \
+        python -m examples.gateway_n8n.viewer_app
+
+It is quiet by design (warning log level): no output means running.
+Quick check:
+
+    curl -s "http://localhost:8181/api/runs" \
+        -H "Authorization: Bearer dev-token"
+
+Caveat: the **Get Generation Content** operation additionally needs a
+redis-backed gateway (compose stack): a memory-mode body lives inside
+the gateway process and is invisible to the viewer (501 with
+guidance). The other five operations (audit / validate / graph /
+tree / generations) work on file-based evidence and need no redis.
+
+
 ## Gateway contract quick reference
 
-These are the wire contracts the nodes were built and verified against
-(M2, gateway v0.1). If your gateway version differs, adjust the path
-constants at the top of each node file.
+The authoritative table lives in [docs/gateway-contract.md](docs/gateway-contract.md)
+(mirrored for CI by the gateway's `test_node_wire_contract.py`, which
+extracts the request schemas' field sets from the app's own openapi).
+Summary of the paths the nodes call:
 
-| Operation | Method & path | Body (required) |
-|---|---|---|
-| Start run | `POST /runs` | `{client, purpose, metadata}` |
-| Finish run | `POST /runs/{id}/finish` | `{status, summary?}` |
-| Tool call | `POST /governed/tool-call` | `{client, purpose, tool, inputs, run_id?, task_id?}` |
-| Submit task | `POST /runs/{id}/tasks` | `{task_id, impl, params, upstream?, parent_task_id?, tools?}` |
-| Poll task | `GET /runs/{run_id}/tasks/{task_id}` | — |
-| HITL pause / resume / retry | `POST /runs/{id}/hitl/{action}` | pause/retry: `{task_id}`; resume: `{root_id}` |
-| HITL receipt | `GET /runs/{id}/hitl/receipt/{action_id}` | — (404 = pending) |
-| Start composite | `POST /runs/{id}/composites` | `{name, params?}` |
-| Poll composite | `GET /runs/{id}/composites/{cid}` | — |
-| LLM chat | `POST /governed/llm-chat` | `{client, purpose, messages, kwargs, run_id?, task_id?}` |
+| Operation | Method & path |
+|---|---|
+| Start run | `POST /runs` (`run_id?`, `budget_max_units?`, `intent?`, `metadata?`) |
+| Finish run | `POST /runs/{id}/finish` (no body; the gateway derives `final_status`) |
+| Cancel run | `POST /runs/{id}/cancel` (no body; wedged-run escape hatch) |
+| LLM chat | `POST /governed/llm-chat` |
+| LLM chat (stream) | `POST /governed/llm-chat-stream` (SSE frames) |
+| Tool call | `POST /governed/tool-call` (`tool`, `inputs`) |
+| Submit task | `POST /runs/{id}/tasks` (`task_id`, `impl`, `params`, `upstream?`, `tools?`) |
+| Poll task | `GET /runs/{run_id}/tasks/{task_id}` |
+| HITL actions | `POST /runs/{id}/hitl/{pause\|resume\|retry}` |
+| HITL receipt | `GET /runs/{id}/hitl/receipt/{action_id}` (404 = pending) |
+| Composites | `POST /runs/{id}/composites`, `GET .../composites/{cid}` |
+| Evidence (viewer) | `GET {viewerBaseUrl}/api/runs/{id}/...` (generations / audit / validate / graph / tree) |
 
--Terminal approval statuses: `approved`, `rejected`, `expired`.
-+Await-decision outcomes: `approved` (a new generation appeared on the task), `rejected` (the run finished without one).
-
+Await-decision outcomes: `approved` (a new generation appeared on the
+task), `rejected` (the run finished without one).
 ## Troubleshooting: the M2 field guide
 
 Every pitfall below was hit and fixed during the M2 end-to-end bring-up.
@@ -358,6 +393,116 @@ the literal:
 (Design-time, this expression renders red because the upstream node has no
 output yet; it resolves at execution time. Drag the field in from the INPUT
 panel instead of typing it.)
+
+### 16. Wire-contract drift is silent (pydantic drops unknown body fields)
+
+The Run and Tool nodes once sent `client` / `purpose` / `metadata`
+bodies the gateway schema never declared: three node parameters were
+decorative, the budget cap (`budget_max_units`) was unreachable, and
+the Finish "Final Status" option was dropped whole (finish takes NO
+body; the gateway derives `final_status` from the tasks). Every node
+test stayed green because the mocks encoded the same wrong contract.
+
+Fix shipped on both sides: the node bodies now carry exactly the
+gateway schema vocabulary (locked by the schema-alignment cases in
+`test/nodes-contract.test.ts`), and the gateway pins the same field
+sets from its own openapi
+(`packages/ordigovernance-gateway/tests/test_node_wire_contract.py`),
+so a schema edit that would silently drop a node field fails the
+gateway build first.
+
+Rule: `docs/gateway-contract.md` mirrors the openapi for humans; the
+openapi is the only truth. When a node body and the schema disagree,
+the openapi wins and the disagreement is a bug in the same commit.
+
+### 17. A wedged run needs the cancel endpoint, not a gateway restart
+
+`finish` 409s while any task is non-terminal, and restarting the
+gateway mid-run kills the dispatcher (pitfall 14: actions accepted,
+receipts never arrive). The escape hatch is `POST /runs/{id}/cancel`:
+the gateway cooperative-cancels every RUNNING task, waits for
+terminal settlement and closes the run as cancelled. The Run node
+exposes it as the **Cancel** operation; "Cancel Existing on Conflict"
+on Start routes through it too.
+
+Note: cancel is cooperative -- a task that never checks its cancel
+flag first finishes its current work (cancel waits for it, up to the
+gateway's settle timeout). Long-running handlers should poll the flag
+(the framework's cooperative-delay pattern).
+
+### 18. Streaming calls use /governed/llm-chat-stream (SSE frames)
+
+The chat model's token-level `_astream` posts to the streaming
+endpoint and consumes frames:
+
+```
+data: {"type": "delta", "text": "...", "reasoning": "..."}
+data: {"type": "done", "call_id": "...", "usage": {...}|null}
+```
+
+`reasoning` carries thinking deltas; the `done` frame carries
+`call_id` + real token usage. Consumers skip keepalive/malformed
+lines; stalls are governed by an idle timeout, not a total budget. A
+registered client without `stream()` answers 422 with guidance (fall
+back to the non-streaming endpoint). Without `_astream`,
+BaseChatModel degrades astream consumers to one monolithic chunk --
+the regression this override exists to prevent.
+
+### 19. Evidence reads need the viewer host (and a redis-backed body)
+
+The Evidence node reads the cold path through the credential's
+**Viewer Base URL** -- never the gateway (D14: hot reads die with the
+run). Two environment facts:
+
+- the viewer host must serve the generation router; the compose stack
+  and `examples/gateway_n8n/viewer_app.py` do;
+- generation-content reads resolve the gateway's memo/archive body:
+  for a memory-mode gateway that body lives inside the gateway
+  process and is invisible to the viewer (501 with guidance). Point
+  both at the same redis (`GATEWAY_REDIS_URL`) when you need
+  archived-generation reads.
+
+### 20. A trailing slash on rm deletes THROUGH the custom-dir symlink
+
+`npm install --prefix ~/.n8n/custom .` leaves a SYMLINK at
+`~/.n8n/custom/node_modules/n8n-nodes-ordigovernance` pointing at the
+source repo. Shell tab-completion adds a trailing slash, and
+`rm -rf .../n8n-nodes-ordigovernance/` then deletes the CONTENTS OF
+THE REPO through the link -- the next build dies, dev-n8n.sh exits on
+`set -e`, and a bare `n8n start` loads an empty package: every node
+fails with `Unrecognized node type: CUSTOM.ordigovernance*`.
+
+Recovery: `git checkout -- .` in the repo, rebuild, re-sync (the
+physical-copy flow in dev-n8n.sh, which never leaves a symlink).
+Rule: when removing the custom-dir entry manually, never let a
+trailing slash ride along -- or just rerun scripts/dev-n8n.sh, whose
+`rm -rf "$PKG_DIR"` is slash-free by construction.
+
+### 21. Budget denial happens at execution/call time, not submit time
+
+Task submission returns accepted even under an exhausted budget: the
+admission check runs when the impl's governed calls reserve units.
+Observed signature (all three together): the task settles `failed`
+with `result: null`, the audit stream shows the CHEAP calls only
+(e.g. search, cost 1) and NO llm_call row (a blocked call leaves no
+audit row -- pitfall 13.11), and a direct call-plane request answers
+`409 admission denied ... BudgetExhaustedError: budget exhausted:
+scope=... max_units=100 balance=-2506` (post-charge semantics: the
+first LLM call overdraws, every subsequent one blocks). Locked by
+the live acceptance run, not yet by an automated test.
+
+### 22. Cancel settle timeout must exceed the slowest task window
+
+The first cancel implementation waited a hardcoded 30s for tasks to
+settle; a slow_researcher with a 30s cooperative window settled at
+exactly t=30 while the deadline expired -- a zero-slack race that
+reproduced deterministically (node surfaced: `tasks did not settle
+after cancel within 30.0s`). Fixed gateway-side: the settle timeout
+defaults to 150s (slowest plausible window + poll slack) and is
+caller-overridable; node-side, the Cancel operation carries its own
+transport budget (max(60s, 2 x pollTimeoutMs)) because the shared
+30s HTTP default aborts mid-settlement. Both sides locked by tests +
+live run.
 
 ## Development
 

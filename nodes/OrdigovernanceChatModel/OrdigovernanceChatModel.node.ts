@@ -1,5 +1,6 @@
 import {
 	NodeConnectionTypes,
+	NodeOperationError,
 	type INodeType,
 	type INodeTypeDescription,
 	type ISupplyDataFunctions,
@@ -88,6 +89,14 @@ export class OrdigovernanceChatModel implements INodeType {
 						default: 300,
 						description: 'Per-request transport timeout',
 					},
+					{
+						displayName: 'Strict Run Routing',
+						name: 'strictRunRouting',
+						type: 'boolean',
+						default: false,
+						description:
+							'Fail when Run ID is empty instead of silently routing the calls to the gateway ambient run. Enable when the calls must join a run audit chain.',
+					},
 				],
 			},
 		],
@@ -101,14 +110,27 @@ export class OrdigovernanceChatModel implements INodeType {
 			runId?: string;
 			taskId?: string;
 			timeout?: number;
+			strictRunRouting?: boolean;
 		};
+
+		const runId = options.runId?.trim() || undefined;
+		// Strict routing: an empty run id would silently land every call
+		// on the ambient run -- the caller believes the calls join a
+		// run's audit chain, so the mismatch must fail loudly instead.
+		if (options.strictRunRouting && !runId) {
+			throw new NodeOperationError(
+				this.getNode(),
+				'Strict Run Routing is enabled but Run ID is empty: the calls would silently land on the gateway ambient run. Set Run ID (e.g. {{ $json.run_id }} from a Run Start node) or disable Strict Run Routing.',
+				{ itemIndex },
+			);
+		}
 
 		const model = new TrackedChatModel({
 			baseUrl: String(credentials.baseUrl ?? ''),
 			token: String(credentials.token ?? ''),
 			client,
 			purpose,
-			runId: options.runId?.trim() || undefined,
+			runId,
 			taskId: options.taskId?.trim() || undefined,
 			timeout: options.timeout,
 		});

@@ -6,7 +6,12 @@ import type {
 	INodeTypeDescription,
 } from 'n8n-workflow';
 import { NodeOperationError } from 'n8n-workflow';
-import { gatewayRequest, pollUntil, type GatewayCredentials } from '../shared/gatewayHttp';
+import {
+	gatewayRequest,
+	GatewayHttpError,
+	pollUntil,
+	type GatewayCredentials,
+} from '../shared/gatewayHttp';
 import { asTrimmedString } from '../shared/nodeParams';
 
 const CREDENTIAL_TYPE = 'ordigovernanceApi';
@@ -24,7 +29,10 @@ const pathTask = (runId: string, taskId: string): string =>
 	`/runs/${encodeURIComponent(runId)}/tasks/${encodeURIComponent(taskId)}`;
 
 function is404(error: unknown): boolean {
-	return error instanceof Error && error.message.includes('[404]');
+	// Structured check against the typed error: the gateway's 404 detail
+	// text is presentation, not contract (GatewayHttpError carries the
+	// parsed status since the shared HTTP layer unification).
+	return error instanceof GatewayHttpError && error.status === 404;
 }
 
 async function getTaskRecordOrNull(
@@ -73,6 +81,12 @@ async function pollHitlReceipt(
 type Decision =
 	| { status: 'approved'; record: Record<string, unknown> }
 	| { status: 'rejected'; reason: string };
+
+/** Gateway ActionAcceptedResponse wire shape (gateway schemas.py). */
+type ActionAcceptedResponse = {
+	action_id: string;
+	accepted: boolean;
+};
 
 export class OrdigovernanceApproval implements INodeType {
 	description: INodeTypeDescription = {
@@ -233,7 +247,7 @@ export class OrdigovernanceApproval implements INodeType {
 						body.task_id = asTrimmedString(this.getNodeParameter('taskId', itemIndex));
 					}
 
-					const acceptance = await gatewayRequest(credentials, {
+					const acceptance = await gatewayRequest<ActionAcceptedResponse>(credentials, {
 						method: 'POST',
 						path: pathHitlAction(runId, operation as 'pause' | 'resume' | 'retry'),
 						body,
@@ -241,7 +255,10 @@ export class OrdigovernanceApproval implements INodeType {
 
 					const waitForReceipt = this.getNodeParameter('waitForReceipt', itemIndex) as boolean;
 					if (waitForReceipt) {
-						const actionId = String(acceptance.action_id ?? acceptance.id ?? '');
+						// action_id is the gateway schema field (ActionAcceptedResponse,
+						// pinned by the wire-contract suite); the old defensive `id`
+						// fallback is gone because the gateway never returns one.
+						const actionId = acceptance.action_id;
 						if (!actionId) {
 							throw new Error('gateway acceptance receipt did not contain an action_id');
 						}

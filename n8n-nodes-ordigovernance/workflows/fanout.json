@@ -1,0 +1,129 @@
+{
+	"name": "ordigovernance: fan-out researchers -> writer -> finish",
+	"active": false,
+	"nodes": [
+		{
+			"parameters": {
+				"content": "## Fan-out -> writer demo\n\nThe Topics code node emits one item per researcher; the Task node executes once per item (D11: colliding ids are auto-suffixed, and the explicit {{ $execution.id }} suffix keeps evidence unique across runs).\n\nThe Aggregate node collects the researcher task ids; the writer's Upstream parameter records them as dependency EVIDENCE edges (D1) -- n8n remains the scheduler.\n\nRequires the demo registry (researcher / writer impls: scripts/dev-gateway.sh). Set the credential's Viewer Base URL for the final validation read. 'Cancel Existing on Conflict' is ON for interactive runs -- turn it off in production."
+			},
+			"id": "aaaaaaaa-0000-4000-8000-000000000001",
+			"name": "Sticky Note",
+			"type": "n8n-nodes-base.stickyNote",
+			"typeVersion": 1,
+			"position": [-560, -240]
+		},
+		{
+			"parameters": {},
+			"id": "aaaaaaaa-0000-4000-8000-000000000002",
+			"name": "Manual Trigger",
+			"type": "n8n-nodes-base.manualTrigger",
+			"typeVersion": 1,
+			"position": [-560, 0]
+		},
+		{
+			"parameters": {
+				"operation": "start",
+				"runId": "",
+				"budgetMaxUnits": 0,
+				"intent": "fan-out demo",
+				"metadata": "{}",
+				"cancelExistingOnConflict": true
+			},
+			"id": "aaaaaaaa-0000-4000-8000-000000000003",
+			"name": "Run Start",
+			"type": "n8n-nodes-ordigovernance.ordigovernanceRun",
+			"typeVersion": 1,
+			"position": [-340, 0]
+		},
+		{
+			"parameters": {
+				"jsCode": "return [\n  { json: { topic: 'ev-battery' } },\n  { json: { topic: 'ev-charging' } },\n  { json: { topic: 'ev-supply' } },\n];"
+			},
+			"id": "aaaaaaaa-0000-4000-8000-000000000004",
+			"name": "Topics",
+			"type": "n8n-nodes-base.code",
+			"typeVersion": 2,
+			"position": [-120, 0]
+		},
+		{
+			"parameters": {
+				"runId": "={{ $('Run Start').item.json.run_id }}",
+				"taskId": "=researcher-{{ $json.topic }}-{{ $execution.id }}",
+				"impl": "researcher",
+				"taskInput": "={{ { topic: $json.topic } }}",
+				"upstream": "",
+				"toolsWhitelist": "",
+				"waitForCompletion": true,
+				"pollIntervalMs": 2000,
+				"pollTimeoutMs": 120000
+			},
+			"id": "aaaaaaaa-0000-4000-8000-000000000005",
+			"name": "Researcher (per item)",
+			"type": "n8n-nodes-ordigovernance.ordigovernanceTask",
+			"typeVersion": 1,
+			"position": [140, 0]
+		},
+		{
+			"parameters": {
+				"aggregate": "aggregateAllItemData",
+				"options": {}
+			},
+			"id": "aaaaaaaa-0000-4000-8000-000000000006",
+			"name": "Aggregate",
+			"type": "n8n-nodes-base.aggregate",
+			"typeVersion": 1,
+			"position": [360, 0]
+		},
+		{
+			"parameters": {
+				"runId": "={{ $('Run Start').item.json.run_id }}",
+				"taskId": "=writer-{{ $execution.id }}",
+				"impl": "writer",
+				"taskInput": "={{ { upstream: $json.data.map((item) => item.task_id) } }}",
+				"upstream": "={{ $json.data.map((item) => item.task_id).join(',') }}",
+				"toolsWhitelist": "",
+				"waitForCompletion": true,
+				"pollIntervalMs": 2000,
+				"pollTimeoutMs": 120000
+			},
+			"id": "aaaaaaaa-0000-4000-8000-000000000007",
+			"name": "Writer",
+			"type": "n8n-nodes-ordigovernance.ordigovernanceTask",
+			"typeVersion": 1,
+			"position": [580, 0]
+		},
+		{
+			"parameters": {
+				"operation": "finish",
+				"runId": "={{ $('Run Start').item.json.run_id }}"
+			},
+			"id": "aaaaaaaa-0000-4000-8000-000000000008",
+			"name": "Run Finish",
+			"type": "n8n-nodes-ordigovernance.ordigovernanceRun",
+			"typeVersion": 1,
+			"position": [800, 0]
+		},
+		{
+			"parameters": {
+				"operation": "validate",
+				"runId": "={{ $('Run Start').item.json.run_id }}",
+				"rootId": "={{ $('Run Start').item.json.run_id }}"
+			},
+			"id": "aaaaaaaa-0000-4000-8000-000000000009",
+			"name": "Validate Bundle",
+			"type": "n8n-nodes-ordigovernance.ordigovernanceEvidence",
+			"typeVersion": 1,
+			"position": [1020, 0]
+		}
+	],
+	"connections": {
+		"Manual Trigger": { "main": [[{ "node": "Run Start", "type": "main", "index": 0 }]] },
+		"Run Start": { "main": [[{ "node": "Topics", "type": "main", "index": 0 }]] },
+		"Topics": { "main": [[{ "node": "Researcher (per item)", "type": "main", "index": 0 }]] },
+		"Researcher (per item)": { "main": [[{ "node": "Aggregate", "type": "main", "index": 0 }]] },
+		"Aggregate": { "main": [[{ "node": "Writer", "type": "main", "index": 0 }]] },
+		"Writer": { "main": [[{ "node": "Run Finish", "type": "main", "index": 0 }]] },
+		"Run Finish": { "main": [[{ "node": "Validate Bundle", "type": "main", "index": 0 }]] }
+	},
+	"settings": { "executionOrder": "v1" }
+}

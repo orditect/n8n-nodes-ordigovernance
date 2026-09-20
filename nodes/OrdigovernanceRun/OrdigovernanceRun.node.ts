@@ -6,12 +6,34 @@ import type {
 	INodeTypeDescription,
 } from 'n8n-workflow';
 import { NodeOperationError } from 'n8n-workflow';
-import { gatewayRequest, type GatewayCredentials } from '../shared/gatewayHttp';
-import { parseJsonObject } from '../shared/nodeParams';
+import {
+	gatewayRequest,
+	GatewayHttpError,
+	type GatewayCredentials,
+} from '../shared/gatewayHttp';
+import { asTrimmedString, parseJsonObject } from '../shared/nodeParams';
 
 const CREDENTIAL_TYPE = 'ordigovernanceApi';
 const PATH_RUNS = '/runs';
-const pathRunFinish = (runId: string): string => `/runs/${encodeURIComponent(runId)}/finish`;
+const pathRunFinish = (runId: string): string =>
+	`/runs/${encodeURIComponent(runId)}/finish`;
+const pathRunCancel = (runId: string): string =>
+	`/runs/${encodeURIComponent(runId)}/cancel`;
+
+/**
+ * Extract the conflicting run id from a structured 409 body.
+ *
+ * The gateway's 409 detail string IS the contract ("a run is already
+ * in progress: '<run-id>'"); reading it from the structured body field
+ * (never the rendered error message) survives message-format changes.
+ */
+function conflictRunIdOf(error: unknown): string | null {
+	if (!(error instanceof GatewayHttpError) || error.status !== 409) return null;
+	const detail = error.body.detail;
+	if (typeof detail !== 'string') return null;
+	const match = detail.match(/'([^']+)'/);
+	return match ? match[1] : null;
+}
 
 export class OrdigovernanceRun implements INodeType {
 	description: INodeTypeDescription = {
@@ -21,7 +43,7 @@ export class OrdigovernanceRun implements INodeType {
 		group: ['transform'],
 		version: 1,
 		subtitle: '={{ $parameter["operation"] }}',
-		description: 'Start or finish a governed run on the Ordigovernance gateway',
+		description: 'Start, finish or force-cancel a governed run on the Ordigovernance gateway',
 		defaults: { name: 'Ordigovernance Run' },
 		inputs: ['main'],
 		outputs: ['main'],
@@ -35,26 +57,37 @@ export class OrdigovernanceRun implements INodeType {
 				options: [
 					{ name: 'Start', value: 'start', action: 'Start a governed run' },
 					{ name: 'Finish', value: 'finish', action: 'Finish a governed run' },
+					{ name: 'Cancel', value: 'cancel', action: 'Force-cancel a wedged run' },
 				],
 				default: 'start',
 			},
+			// ---- start -----------------------------------------------------
 			{
-				displayName: 'Client',
-				name: 'client',
+				displayName: 'Run ID',
+				name: 'runId',
 				type: 'string',
 				default: '',
-				required: true,
 				displayOptions: { show: { operation: ['start'] } },
-				description: 'Client identifier recorded on the run',
+				description:
+					'Optional explicit run id (idempotent retries); empty lets the gateway mint one',
 			},
 			{
-				displayName: 'Purpose',
-				name: 'purpose',
+				displayName: 'Budget Max Units',
+				name: 'budgetMaxUnits',
+				type: 'number',
+				default: 0,
+				displayOptions: { show: { operation: ['start'] } },
+				description:
+					'Budget cap in token units for the run (0 = the gateway default). Unknown body fields are silently dropped by the gateway schema, so this must ride the budget_max_units field.',
+			},
+			{
+				displayName: 'Intent',
+				name: 'intent',
 				type: 'string',
 				default: '',
-				required: true,
 				displayOptions: { show: { operation: ['start'] } },
-				description: 'Purpose label recorded on the run',
+				description:
+					'Business intent recorded on the run registry entry (provenance only; the gateway never interprets it)',
 			},
 			{
 				displayName: 'Metadata',
@@ -62,18 +95,18 @@ export class OrdigovernanceRun implements INodeType {
 				type: 'json',
 				default: '{}',
 				displayOptions: { show: { operation: ['start'] } },
-				description: 'Optional JSON metadata attached to the run',
+				description: 'Optional JSON metadata recorded on the registry entry',
 			},
 			{
-				displayName: 'Finish Existing on Conflict',
-				name: 'finishExistingOnConflict',
+				displayName: 'Cancel Existing on Conflict',
+				name: 'cancelExistingOnConflict',
 				type: 'boolean',
 				default: false,
 				displayOptions: { show: { operation: ['start'] } },
 				description:
-					'Whether to cancel a stale in-progress run and retry when the gateway rejects start with 409. Use for interactive development; keep off in production so conflicts surface loudly.',
+					'On 409, force-cancel the stale run (the gateway cancels its running tasks and closes it) and retry once. Dev convenience; keep off in production so conflicts surface loudly.',
 			},
-
+			// ---- finish ----------------------------------------------------
 			{
 				displayName: 'Run ID',
 				name: 'runId',
@@ -83,26 +116,25 @@ export class OrdigovernanceRun implements INodeType {
 				displayOptions: { show: { operation: ['finish'] } },
 				description: 'Identifier of the run to finish',
 			},
+			// ---- cancel ----------------------------------------------------
 			{
-				displayName: 'Final Status',
-				name: 'finalStatus',
-				type: 'options',
-				options: [
-					{ name: 'Succeeded', value: 'succeeded' },
-					{ name: 'Failed', value: 'failed' },
-					{ name: 'Cancelled', value: 'cancelled' },
-				],
-				default: 'succeeded',
-				displayOptions: { show: { operation: ['finish'] } },
-				description: 'Terminal status reported for the run',
-			},
-			{
-				displayName: 'Summary',
-				name: 'summary',
+				displayName: 'Run ID',
+				name: 'runId',
 				type: 'string',
 				default: '',
-				displayOptions: { show: { operation: ['finish'] } },
-				description: 'Optional human-readable summary of the run outcome',
+				required: true,
+				displayOptions: { show: { operation: ['cancel'] } },
+				description:
+					'Identifier of the wedged run to force-cancel (cooperative-cancel its running tasks, then close as cancelled)',
+			},
+			{
+				displayName: 'Poll Timeout (Ms)',
+				name: 'pollTimeoutMs',
+				type: 'number',
+				default: 300000,
+				displayOptions: { show: { operation: ['cancel'] } },
+				description:
+					'Cancel waits for every running task to settle; this value doubles as the transport timeout floor (minimum 60s)',
 			},
 		],
 	};
@@ -120,14 +152,28 @@ export class OrdigovernanceRun implements INodeType {
 				let response: Record<string, unknown>;
 
 				if (operation === 'start') {
-					const client = this.getNodeParameter('client', itemIndex) as string;
-					const purpose = this.getNodeParameter('purpose', itemIndex) as string;
+					// Gateway StartRunRequest schema: {run_id?, budget_max_units?,
+					// intent?, metadata?}. Pydantic drops unknown fields silently
+					// (pitfall: contract drift), so the body carries exactly these.
+					const body: Record<string, unknown> = {};
+					const runId = asTrimmedString(this.getNodeParameter('runId', itemIndex));
+					if (runId) body.run_id = runId;
+					const budgetMaxUnits = this.getNodeParameter(
+						'budgetMaxUnits',
+						itemIndex,
+						0,
+					) as number;
+					if (budgetMaxUnits > 0) body.budget_max_units = budgetMaxUnits;
+					const intent = asTrimmedString(this.getNodeParameter('intent', itemIndex));
+					if (intent) body.intent = intent;
 					const metadata = parseJsonObject(
 						this.getNodeParameter('metadata', itemIndex),
 						'metadata',
 					);
-					const finishExisting = this.getNodeParameter(
-						'finishExistingOnConflict',
+					if (Object.keys(metadata).length > 0) body.metadata = metadata;
+
+					const cancelExisting = this.getNodeParameter(
+						'cancelExistingOnConflict',
 						itemIndex,
 						false,
 					) as boolean;
@@ -136,36 +182,51 @@ export class OrdigovernanceRun implements INodeType {
 						response = await gatewayRequest(credentials, {
 							method: 'POST',
 							path: PATH_RUNS,
-							body: { client, purpose, metadata },
+							body,
 						});
 					} catch (error) {
-						// Single-active-run gateway: on 409, optionally cancel the
-						// stale run parsed from the error detail and retry once.
-						const message = error instanceof Error ? error.message : String(error);
-						const conflictRunId = message.match(/\[409\].*'([^']+)'/)?.[1];
-						if (!finishExisting || !conflictRunId) throw error;
+						// Single-active-run gateway: on 409, optionally force-cancel
+						// the stale run (the escape hatch that also settles its
+						// running tasks) and retry once.
+						const conflictRunId = conflictRunIdOf(error);
+						if (!cancelExisting || !conflictRunId) throw error;
 
 						await gatewayRequest(credentials, {
 							method: 'POST',
-							path: pathRunFinish(conflictRunId),
-							body: { status: 'cancelled', summary: 'auto-cancelled by n8n retry' },
+							path: pathRunCancel(conflictRunId),
 						});
 						response = await gatewayRequest(credentials, {
 							method: 'POST',
 							path: PATH_RUNS,
-							body: { client, purpose, metadata },
+							body,
 						});
 					}
-				} else {
-					const runId = (this.getNodeParameter('runId', itemIndex) as string).trim();
-					const finalStatus = this.getNodeParameter('finalStatus', itemIndex) as string;
-					const summary = this.getNodeParameter('summary', itemIndex) as string;
-					const body: Record<string, unknown> = { status: finalStatus };
-					if (summary) body.summary = summary;
+				} else if (operation === 'finish') {
+					// Finish takes NO body: the gateway derives final_status from
+					// the registered tasks' terminal statuses; a client-declared
+					// status would never be trusted as evidence.
+					const runId = asTrimmedString(this.getNodeParameter('runId', itemIndex));
 					response = await gatewayRequest(credentials, {
 						method: 'POST',
 						path: pathRunFinish(runId),
-						body,
+					});
+				} else {
+					// cancel: force-cancel the run's running tasks and close it.
+					// The gateway WAITS for every task to settle terminally
+					// (cooperative cancel windows abort at their next slice
+					// boundary), so the response can legitimately take as
+					// long as the longest running task -- far beyond the
+					// shared 30s default. Poll-timeout doubles as the cancel
+					// transport budget with a generous floor.
+					const runId = asTrimmedString(this.getNodeParameter('runId', itemIndex));
+					const cancelTimeoutMs = Math.max(
+						60000,
+						(this.getNodeParameter('pollTimeoutMs', itemIndex, 0) as number) * 2,
+					);
+					response = await gatewayRequest(credentials, {
+						method: 'POST',
+						path: pathRunCancel(runId),
+						timeoutMs: cancelTimeoutMs,
 					});
 				}
 
@@ -182,6 +243,7 @@ export class OrdigovernanceRun implements INodeType {
 					this.getNode(),
 					error instanceof Error ? error.message : String(error),
 					{ itemIndex },
+
 				);
 			}
 		}

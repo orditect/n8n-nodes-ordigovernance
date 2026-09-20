@@ -13,7 +13,8 @@ Two sibling checkouts are required:
     ~/Projects/n8n-nodes-ordigovernance   # this repository
 
 1. Terminal 1 (keep running):
-   `cd ~/Projects/orditect-governance && scripts/dev-gateway.sh`
+   `cd ~/Projects/orditect-governance && scripts/
+2. dev-gateway.sh`
 2. Terminal 2 (keep running):
    `cd ~/Projects/n8n-nodes-ordigovernance && scripts/dev-n8n.sh`
 3. Browser: hard-refresh http://localhost:5678
@@ -25,6 +26,8 @@ Two sibling checkouts are required:
 | 1 | m3-hitl-approval.json | pause -> cancelled visible in hot record; curl resume -> awaitDecision returns `approved` with new execution_id; receipt + prevs verified |
 | 2 | m4-narrative.json | all five tasks `succeeded`; writer output `input_pins` has both researcher ids; audit shows no `search-*` line for writer |
 | 3 | m5-quality-gate.json | composite `status: succeeded`; `outcome.iterations` >= 1; audit shows per-iteration `write-*` / `review-*` generations |
+| 4 | fanout.json | all three researchers + writer `succeeded`; writer result `input_pins` carries the three researcher task ids; validate reports PASS |
+| 5 | hitl-long.json | pause settles the task cancelled; external resume -> awaitDecision `approved` with a new execution_id; generation content read from the viewer |
 
 ## Audit spot-check (any run)
 

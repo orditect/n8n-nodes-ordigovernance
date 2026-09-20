@@ -4,21 +4,54 @@
 # Usage: scripts/dev-n8n.sh
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-NODES_DIR="$REPO_ROOT/n8n-nodes-ordigovernance"
-CUSTOM_DIR="${N8N_CUSTOM_DIR:-$HOME/.n8n/custom}"
-PKG_DIR="$CUSTOM_DIR/node_modules/n8n-nodes-ordigovernance"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Resolve the node package root for either repository layout:
+#   1. this script lives INSIDE the package repo (scripts/ sits next
+#      to package.json) -> the package root is one level up;
+#   2. this script lives in a parent workspace with the package
+#      checked out at <parent>/n8n-nodes-ordigovernance.
+# NEVER resolve into a nested docs-only "n8n-nodes-ordigovernance/"
+# directory that may exist INSIDE the package repo: it carries no
+# package.json, npm run resolves the build script through the PARENT
+# package.json, and the sync's cp step then fails from the wrong CWD,
+# leaving an empty package dir in custom/ (the all-nodes
+# "Unrecognized node type: CUSTOM.*" failure mode).
+if [[ -f "$SCRIPT_DIR/../package.json" ]]; then
+  NODES_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+elif [[ -f "$SCRIPT_DIR/../n8n-nodes-ordigovernance/package.json" ]]; then
+  NODES_DIR="$(cd "$SCRIPT_DIR/../n8n-nodes-ordigovernance" && pwd)"
+else
+  echo "ERROR: node package not found (no package.json above $SCRIPT_DIR and no n8n-nodes-ordigovernance/ sibling)." >&2
+  exit 1
+fi
 
 # 1. Build the node package (tsc + icons).
 cd "$NODES_DIR"
 npm run build
 
+# Hard gate: die loudly when the build produced no node output, so a
+# half-run can never leave an empty package dir in custom/.
+if [[ ! -f "$NODES_DIR/dist/nodes/OrdigovernanceRun/OrdigovernanceRun.node.js" ]]; then
+  echo "ERROR: npm run build produced no dist/nodes output; fix the build first." >&2
+  exit 1
+fi
+
 # 2. Sync a PHYSICAL copy into n8n's custom extensions dir.
 #    `npm install <local path>` creates a symlink; a physical copy is
 #    loaded by every n8n version and survives editor-side rebuilds.
+#    All paths are absolute: the copy must never depend on the CWD.
+CUSTOM_DIR="${N8N_CUSTOM_DIR:-$HOME/.n8n/custom}"
+PKG_DIR="$CUSTOM_DIR/node_modules/n8n-nodes-ordigovernance"
 rm -rf "$PKG_DIR"
 mkdir -p "$PKG_DIR"
-cp -r package.json dist "$PKG_DIR/"
+cp -r "$NODES_DIR/package.json" "$NODES_DIR/dist" "$PKG_DIR/"
+
+# Verification gate: the physical copy must be loadable.
+if [[ ! -f "$PKG_DIR/dist/nodes/OrdigovernanceRun/OrdigovernanceRun.node.js" ]]; then
+  echo "ERROR: sync verification failed (empty copy at $PKG_DIR)." >&2
+  exit 1
+fi
 
 # 3. Stop any stale n8n process so the fresh copy is what gets loaded.
 pkill -f "n8n start" 2>/dev/null || true

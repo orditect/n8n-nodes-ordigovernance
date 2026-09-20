@@ -1,0 +1,69 @@
+{
+	"name": "ordigovernance: verify chat model streaming (SSE)",
+	"active": false,
+	"nodes": [
+		{
+			"parameters": {
+				"content": "## Streaming verification\n\nA manual trigger drives ONE model call directly through the governed chat model (no agent loop needed): the Basic LLM Chain exercises the model's streaming path (astream/_stream -> POST /governed/llm-chat-stream).\n\nAcceptance:\n1. the node answers (content from the governed call);\n2. gateway log shows the llm-chat-stream endpoint hit;\n3. if the endpoint fell back to non-streaming, the node STILL answers -- check the gateway log to distinguish.\n\nRequires: research client in the registry (scripts/dev-gateway.sh)."
+			},
+			"id": "cccc0000-0000-4000-8000-000000000001",
+			"name": "Sticky Note",
+			"type": "n8n-nodes-base.stickyNote",
+			"typeVersion": 1,
+			"position": [-560, -240]
+		},
+		{
+			"parameters": {},
+			"id": "cccc0000-0000-4000-8000-000000000002",
+			"name": "Manual Trigger",
+			"type": "n8n-nodes-base.manualTrigger",
+			"typeVersion": 1,
+			"position": [-560, 0]
+		},
+		{
+			"parameters": {
+				"promptType": "define",
+				"text": "=Summarize in exactly one sentence why auditable AI agent calls matter. Run ID context: {{ $('Evidence Probe').item.json.run_id || 'ambient' }}"
+			},
+			"id": "cccc0000-0000-4000-8000-000000000003",
+			"name": "Basic LLM Chain",
+			"type": "@n8n/n8n-nodes-langchain.chainLlm",
+			"typeVersion": 1.5,
+			"position": [-340, 0],
+			"credentials": {}
+		},
+		{
+			"parameters": {
+				"client": "research",
+				"purpose": "verify-stream",
+				"options": {
+					"timeout": 60
+				}
+			},
+			"id": "cccc0000-0000-4000-8000-000000000004",
+			"name": "Ordigovernance Chat Model",
+			"type": "n8n-nodes-ordigovernance.ordigovernanceChatModel",
+			"typeVersion": 1,
+			"position": [-340, 180]
+		},
+		{
+			"parameters": {
+				"operation": "getAudit",
+				"runId": "={{ $json.run_id || 'ambient' }}",
+				"taskId": "",
+				"rootId": ""
+			},
+			"id": "cccc0000-0000-4000-8000-000000000005",
+			"name": "Audit Probe",
+			"type": "n8n-nodes-ordigovernance.ordigovernanceEvidence",
+			"typeVersion": 1,
+			"position": [100, 0]
+		}
+	],
+	"connections": {
+		"Manual Trigger": { "main": [[{ "node": "Basic LLM Chain", "type": "main", "index": 0 }]] },
+		"Basic LLM Chain": { "main": [[{ "node": "Audit Probe", "type": "main", "index": 0 }]] },
+		"Ordigovernance Chat Model": { "ai_languageModel": [[{ "node": "Basic LLM Chain", "type": "ai_languageModel", "index": 0 }]] }
+	},
+	"settings": { "executionOrder": "v1" }
+}

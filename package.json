@@ -38,7 +38,8 @@
       "dist/nodes/OrdigovernanceTool/OrdigovernanceTool.node.js",
       "dist/nodes/OrdigovernanceTask/OrdigovernanceTask.node.js",
       "dist/nodes/OrdigovernanceApproval/OrdigovernanceApproval.node.js",
-      "dist/nodes/OrdigovernanceComposite/OrdigovernanceComposite.node.js"
+      "dist/nodes/OrdigovernanceComposite/OrdigovernanceComposite.node.js",
+      "dist/nodes/OrdigovernanceEvidence/OrdigovernanceEvidence.node.js"
     ]
   },
   "peerDependencies": {
