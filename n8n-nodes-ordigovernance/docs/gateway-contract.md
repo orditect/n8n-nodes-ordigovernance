@@ -1,7 +1,7 @@
 # Gateway contract (node maintainer's reference)
 
 The normative design record lives in the orditect-governance
-repository (docs/n8n-bridge-design.md). This file carries the subset a
+repository (docs/gateway-design.md).This file carries the subset a
 node maintainer needs: wire contracts and the decisions that shape
 node behavior.
 
@@ -81,6 +81,25 @@ The viewer host ships in the orditect-governance repo:
 
 `GATEWAY_TRACE_ROOT` must match the gateway's setting (both default
 to `data/gateway-runs` when launched from the same checkout).
+
+## OpenAI-compatible surface (D18)
+
+Served by the gateway for OpenAI-compatible clients that cannot call
+the governed-native route (n8n's built-in OpenAI Chat Model node).
+Same governed path as `/governed/llm-chat`; envelope swap only.
+
+| operation | method & path | notes |
+|---|---|---|
+| Models | `GET /v1/models` | strict OpenAI models-list shape; the n8n OpenAI credential test and the model dropdown both read it |
+| Chat completion | `POST /v1/chat/completions` | body `model` -> client registry key; `messages` verbatim; every other field transported opaquely as kwargs; `stream: true` yields OpenAI chunk envelopes (content / reasoning_content / tool_calls deltas) ending with a usage chunk + `data: [DONE]`; errors use the OpenAI error envelope |
+
+Attribution headers: `X-Governance-Run-Id` (`@active` sentinel ->
+active run resolved per request, degrades to ambient when none is
+active; explicit id -> strict, 404 when not active),
+`X-Governance-Task-Id` (D8 semantics), `X-Governance-Purpose`
+(default `openai-compat`). Absent headers -> ambient run (D2).
+Retry note: an OpenAI SDK retry is a fresh governed call and may
+bill twice.
 
 ## Evidence plane (viewer cold path)
 

@@ -10,7 +10,7 @@ export class OrdigovernanceApi implements ICredentialType {
 
 	displayName = 'Ordigovernance Gateway API';
 
-	documentationUrl = 'https://github.com/orditect/orditect-governance';
+	documentationUrl = 'https://github.com/orditect/n8n-nodes-ordigovernance#readme';
 
 	properties: INodeProperties[] = [
 		{

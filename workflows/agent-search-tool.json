@@ -1,0 +1,48 @@
+{
+  "name": "ordigovernance search tool (sub)",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [-64, 0],
+      "id": "7c1e2a34-9b01-4c8d-8e2f-3a4b5c6d7e01",
+      "name": "Execute Workflow Trigger"
+    },
+    {
+      "parameters": {
+        "toolName": "search",
+        "toolInputs": "={\"query\": \"{{ $json.query }}\"}",
+        "runId": "smoke-run-2",
+        "taskId": ""
+      },
+      "type": "CUSTOM.ordigovernanceTool",
+      "typeVersion": 1,
+      "position": [192, 0],
+      "id": "7c1e2a34-9b02-4c8d-8e2f-3a4b5c6d7e02",
+      "name": "Ordigovernance Tool",
+      "credentials": {
+        "ordigovernanceApi": {
+          "name": "Ordigovernance Gateway API account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "Ordigovernance Tool",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

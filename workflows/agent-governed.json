@@ -1,0 +1,164 @@
+{
+  "name": "ordigovernance agent smoke (built-in nodes)",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [-400, -16],
+      "id": "f1c90a48-2dbc-48b0-a7cf-da54dd0023cc",
+      "name": "When clicking 'Execute workflow'"
+    },
+    {
+      "parameters": {
+        "operation": "start",
+        "runId": "smoke-run-2",
+        "budgetMaxUnits": 0,
+        "intent": "agent smoke: built-in OpenAI Chat Model + governed tool",
+        "metadata": {},
+        "cancelExistingOnConflict": true
+      },
+      "type": "CUSTOM.ordigovernanceRun",
+      "typeVersion": 1,
+      "position": [-144, -32],
+      "id": "5fea88db-7347-489a-89ee-65793be6c9a1",
+      "name": "Ordigovernance Run (Start)",
+      "credentials": {
+        "ordigovernanceApi": {
+          "name": "Ordigovernance Gateway API account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "Search the web for the latest EV battery news, then summarize the findings in one short sentence.",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [112, -16],
+      "id": "0fd4102f-aee7-483c-aff2-15a54300fc75",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "useResponsesApi": false,
+        "model": {
+          "__rl": true,
+          "value": "research",
+          "mode": "list",
+          "cachedResultName": "research"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [48, 288],
+      "id": "2f11621e-2277-466f-8724-13c732cba5b9",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_SUBWORKFLOW_ID",
+          "mode": "list",
+          "cachedResultName": "ordigovernance search tool (sub)",
+          "cachedResultUrl": "workflow/REPLACE_WITH_SUBWORKFLOW_ID"
+        },
+        "descriptionType": "manual",
+        "description": "Search the web for current information. Input: query (the search query string).",
+        "jsonSchemaExample": "{\"query\": \"the search query to run\"}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2,
+      "position": [304, 288],
+      "id": "9a8b7c6d-5e4f-4301-8210-76543210fedc",
+      "name": "Call n8n Workflow Tool"
+    },
+    {
+      "parameters": {
+        "operation": "finish",
+        "runId": "smoke-run-2"
+      },
+      "type": "CUSTOM.ordigovernanceRun",
+      "typeVersion": 1,
+      "position": [416, -16],
+      "id": "1a2b3c4d-5e6f-4701-89ab-cdef01234567",
+      "name": "Ordigovernance Run (Finish)",
+      "credentials": {
+        "ordigovernanceApi": {
+          "name": "Ordigovernance Gateway API account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "When clicking 'Execute workflow'": {
+      "main": [
+        [
+          {
+            "node": "Ordigovernance Run (Start)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ordigovernance Run (Start)": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Ordigovernance Run (Finish)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call n8n Workflow Tool": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

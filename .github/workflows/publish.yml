@@ -1,0 +1,47 @@
+# Publish to npm with provenance.
+#
+# n8n requires community nodes to be published via GitHub Actions
+# with npm provenance statements (in force since 2026-05-01). This
+# workflow satisfies that requirement.
+#
+# Setup (one of):
+#   Option A (recommended): OIDC trusted publishing -- no secrets.
+#     1. On npmjs.com configure a trusted publisher for this package:
+#        repository owner, repository name, workflow filename
+#        (publish.yml), environment (empty unless you use one).
+#     2. Remove the NODE_AUTH_TOKEN env line from the publish step.
+#        Requires npm >= 11.5.1 (setup-node with node-version lts/*
+#        provides it).
+#   Option B: NPM_TOKEN secret.
+#     1. Create a granular npm access token scoped to this package.
+#     2. Add it as the NPM_TOKEN secret in this repository.
+#
+# Release flow: run `npm run release` locally (np bumps the version,
+# commits, tags and pushes; --no-publish skips the local publish);
+# the tag push triggers this workflow, which publishes with
+# provenance.
+
+name: Publish to npm
+
+on:
+  push:
+    tags:
+      - '*.*.*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # required to mint the OIDC token for provenance
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          registry-url: https://registry.npmjs.org
+      - run: npm ci
+      - run: npm run build
+      - run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}  # omit for Option A
